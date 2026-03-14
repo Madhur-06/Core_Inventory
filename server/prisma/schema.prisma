@@ -1,0 +1,216 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  INVENTORY_MANAGER
+  WAREHOUSE_STAFF
+}
+
+enum OperationType {
+  RECEIPT
+  DELIVERY
+  ADJUSTMENT
+  TRANSFER
+}
+
+enum OperationStatus {
+  DRAFT
+  WAITING
+  READY
+  DONE
+  CANCELLED
+}
+
+enum MoveType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         Role     @default(WAREHOUSE_STAFF)
+  isActive     Boolean  @default(true) @map("is_active")
+  avatarUrl    String?  @map("avatar_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  otps             Otp[]
+  stockOperations  StockOperation[]
+  moveHistories    MoveHistory[]
+  activityLogs     ActivityLog[]
+
+  @@map("users")
+}
+
+model Otp {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  code      String
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("otps")
+}
+
+model Warehouse {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  address   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  locations Location[]
+
+  @@map("warehouses")
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  warehouseId String   @map("warehouse_id")
+  name        String
+  code        String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  warehouse          Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stockLevels        StockLevel[]
+  sourceOperations   StockOperation[] @relation("SourceLocation")
+  destOperations     StockOperation[] @relation("DestLocation")
+  moveHistories      MoveHistory[]
+
+  @@unique([warehouseId, code])
+  @@map("locations")
+}
+
+model ProductCategory {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  products Product[]
+
+  @@map("product_categories")
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  name          String
+  sku           String   @unique
+  categoryId    String?  @map("category_id")
+  unitOfMeasure String   @default("Units") @map("unit_of_measure")
+  description   String?
+  imageUrl      String?  @map("image_url")
+  costPrice     Float    @default(0) @map("cost_price")
+  reorderPoint  Int      @default(0) @map("reorder_point")
+  reorderQty    Int      @default(0) @map("reorder_qty")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  category       ProductCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stockLevels    StockLevel[]
+  operationLines StockOperationLine[]
+  moveHistories  MoveHistory[]
+
+  @@map("products")
+}
+
+model StockLevel {
+  id          String @id @default(uuid())
+  productId   String @map("product_id")
+  locationId  String @map("location_id")
+  quantity    Int    @default(0)
+  reservedQty Int    @default(0) @map("reserved_qty")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locationId])
+  @@map("stock_levels")
+}
+
+model StockOperation {
+  id                  String          @id @default(uuid())
+  type                OperationType
+  referenceNumber     String          @unique @map("reference_number")
+  status              OperationStatus @default(DRAFT)
+  sourceLocationId    String?         @map("source_location_id")
+  destinationLocationId String?       @map("destination_location_id")
+  supplierName        String?         @map("supplier_name")
+  customerName        String?         @map("customer_name")
+  notes               String?
+  createdBy           String          @map("created_by")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+  validatedAt         DateTime?       @map("validated_at")
+
+  sourceLocation      Location?              @relation("SourceLocation", fields: [sourceLocationId], references: [id])
+  destinationLocation Location?              @relation("DestLocation", fields: [destinationLocationId], references: [id])
+  creator             User                   @relation(fields: [createdBy], references: [id])
+  lines               StockOperationLine[]
+  moveHistories       MoveHistory[]
+
+  @@map("stock_operations")
+}
+
+model StockOperationLine {
+  id          String @id @default(uuid())
+  operationId String @map("operation_id")
+  productId   String @map("product_id")
+  expectedQty Int    @map("expected_qty")
+  actualQty   Int?   @map("actual_qty")
+
+  operation StockOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  product   Product        @relation(fields: [productId], references: [id])
+
+  @@map("stock_operation_lines")
+}
+
+model MoveHistory {
+  id             String   @id @default(uuid())
+  productId      String   @map("product_id")
+  locationId     String   @map("location_id")
+  operationId    String?  @map("operation_id")
+  quantityChange Int      @map("quantity_change")
+  balanceAfter   Int      @map("balance_after")
+  moveType       MoveType @map("move_type")
+  timestamp      DateTime @default(now())
+  createdBy      String   @map("created_by")
+
+  product   Product         @relation(fields: [productId], references: [id])
+  location  Location        @relation(fields: [locationId], references: [id])
+  operation StockOperation? @relation(fields: [operationId], references: [id])
+  creator   User            @relation(fields: [createdBy], references: [id])
+
+  @@map("move_history")
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  details     String?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
